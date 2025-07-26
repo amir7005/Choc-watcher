@@ -4,3 +4,5 @@ requests
 flask
 selenium
 webdriver-manager
+matplotlib
+pillow
