@@ -1,30 +1,27 @@
 from flask import Flask
 import requests
-import os
 
 app = Flask(__name__)
 
-# این تابع برای تست ارسال پیام تلگرامه
-def send_telegram_message(message):
-    bot_token = '8253237534:AAFZr4EpriINZtYsuKB2EY4sO7S8Ja52Jhc'
-    chat_id = '5214257544'
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = {"chat_id": chat_id, "text": message}
-    try:
-        res = requests.post(url, json=payload)
-        print("Telegram response:", res.text)
-    except Exception as e:
-        print("Telegram Error:", e)
+# اطلاعات ربات و چت آیدی — حتماً اینجا توکن جدید رو بذار
+BOT_TOKEN = 'توکن_جدید_تو_اینجا'
+CHAT_ID = '5214257544'
+
+def send_test_message():
+    message = "✅ ربات با موفقیت روی Render اجرا شده!"
+    url = f'https://api.telegram.org/bot{BOT_TOKEN}/sendMessage'
+    payload = {
+        'chat_id': CHAT_ID,
+        'text': message
+    }
+    response = requests.post(url, data=payload)
+    print("Status code:", response.status_code)
+    print("Response:", response.text)
 
 @app.route('/')
-def index():
-    return 'Bot is running.'
-
-@app.route('/test')
-def test():
-    send_telegram_message("✅ تست موفق بود! بات کار می‌کنه.")
-    return 'Test message sent!'
+def home():
+    send_test_message()
+    return "Bot is running ✅"
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host='0.0.0.0', port=10000)
