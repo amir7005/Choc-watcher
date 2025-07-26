@@ -2,18 +2,20 @@ import ccxt
 import pandas as pd
 import requests
 import time
-from flask import Flask
 from datetime import datetime
 import io
 from PIL import Image
 import matplotlib.pyplot as plt
+from flask import Flask, request
+import json
+
+app = Flask(__name__)  # ← این خط مهمه
 
 # ================= تنظیمات ==================
 bot_token = '8253237534:AAFZr4EpriINZtYsuKB2EY4sO7S8Ja52Jhc'
 chat_id = '5214257544'
 
 # ============================================
-app = Flask(__name__)
 
 def get_ohlcv(symbol="BTC/USDT", timeframe="1m", limit=100):
     exchange = ccxt.binance()
