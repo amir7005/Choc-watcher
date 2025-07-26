@@ -13,7 +13,7 @@ app = Flask(__name__)
 # اطلاعات ربات تلگرام
 bot_token = '8253237534:AAFZr4EpriINZtYsuKB2EY4sO7S8Ja52Jhc'
 chat_id = '5214257544'
-screenshot_api_key = 'ATF0ER9-CB64RHQ-PF3D365-4TFA8JP'
+screenshot_api_key = 'BDCSXTX-EMWM9NP-PC87A5Z-5VNVKRC'
 
 def get_ohlcv(symbol="BTC/USDT", timeframe="1m", limit=100):
     exchange = ccxt.binance()
