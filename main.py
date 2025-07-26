@@ -2,102 +2,88 @@ import ccxt
 import pandas as pd
 import requests
 import time
+from flask import Flask
 from datetime import datetime
 import io
 from PIL import Image
 import matplotlib.pyplot as plt
-from flask import Flask, request
-import requests
-import json
 
-app = Flask(__name__)  # ← این خط مهمه
+# ================= تنظیمات ==================
+bot_token = '8253237534:AAFZr4EpriINZtYsuKB2EY4sO7S8Ja52Jhc'
+chat_id = '5214257544'
 
-# -------- تنظیمات --------
-bot_token = "8253237534:AAFZr4EpriINZtYsuKB2EY4sO7S8Ja52Jhc"
-chat_id = "5214257544"
-render_api_key = "rnd_TjXiPj1lnwQGLdOajZPXa7xvN7nT"
-render_service_id = "srv-d22aspre5dus739es2o0"
+# ============================================
+app = Flask(__name__)
 
-# -------- پیام ساده به تلگرام --------
-def send_telegram_message(text):
+def get_ohlcv(symbol="BTC/USDT", timeframe="1m", limit=100):
+    exchange = ccxt.binance()
+    ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+    df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+    return df
+
+def detect_change_of_character(df):
+    df['high_shifted'] = df['high'].shift(1)
+    df['low_shifted'] = df['low'].shift(1)
+
+    df['lower_high'] = df['high'] < df['high_shifted']
+    df['lower_low'] = df['low'] < df['low_shifted']
+    df['higher_high'] = df['high'] > df['high_shifted']
+    df['higher_low'] = df['low'] > df['low_shifted']
+
+    bearish = df['lower_high'].iloc[-3] and df['lower_low'].iloc[-3] and df['high'].iloc[-1] > df['high'].iloc[-3]
+    bullish = df['higher_high'].iloc[-3] and df['higher_low'].iloc[-3] and df['low'].iloc[-1] < df['low'].iloc[-3]
+
+    if bullish:
+        return 'bullish'
+    elif bearish:
+        return 'bearish'
+    return None
+
+def send_telegram_message(message):
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": text
-    }
+    payload = {'chat_id': chat_id, 'text': message}
     requests.post(url, data=payload)
 
-# -------- ارسال دکمه‌ها به تلگرام --------
-def send_buttons():
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    keyboard = {
-        "inline_keyboard": [
-            [
-                {"text": "🛑 توقف هشدارها", "callback_data": "stop"},
-                {"text": "✅ فعال‌سازی هشدارها", "callback_data": "start"}
-            ]
-        ]
-    }
-    payload = {
-        "chat_id": chat_id,
-        "text": "مدیریت وضعیت هشدارها:",
-        "reply_markup": json.dumps(keyboard)
-    }
-    requests.post(url, data=payload)
+def plot_chart(df):
+    plt.figure(figsize=(10, 5))
+    plt.plot(df['close'], label='Close Price', color='blue')
+    plt.title('BTC/USDT - 1m Chart')
+    plt.xlabel('Candle Index')
+    plt.ylabel('Price (USDT)')
+    plt.grid(True)
+    plt.legend()
 
-# -------- کنترل سرویس Render --------
-def start_render_service():
-    url = f"https://api.render.com/v1/services/{render_service_id}/resume"
-    headers = {
-        "Accept": "application/json",
-        "Authorization": f"Bearer {render_api_key}"
-    }
-    response = requests.put(url, headers=headers)
-    return response.status_code == 200
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    plt.close()
+    return buf
 
-def stop_render_service():
-    url = f"https://api.render.com/v1/services/{render_service_id}/suspend"
-    headers = {
-        "Accept": "application/json",
-        "Authorization": f"Bearer {render_api_key}"
-    }
-    response = requests.put(url, headers=headers)
-    return response.status_code == 200
+def send_photo_telegram(photo_buf):
+    url = f'https://api.telegram.org/bot{bot_token}/sendPhoto'
+    files = {'photo': ('chart.png', photo_buf)}
+    data = {'chat_id': chat_id}
+    requests.post(url, files=files, data=data)
 
-# -------- Webhook برای دکمه‌ها --------
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    data = request.json
-
-    if 'callback_query' in data:
-        query = data['callback_query']
-        data_value = query['data']
-
-        if data_value == 'stop':
-            if stop_render_service():
-                send_telegram_message("🔴 هشدارها غیرفعال شد (سرویس متوقف شد).")
-            else:
-                send_telegram_message("⚠️ خطا در توقف سرویس Render.")
-
-        elif data_value == 'start':
-            if start_render_service():
-                send_telegram_message("🟢 هشدارها فعال شد (سرویس راه‌اندازی شد).")
-            else:
-                send_telegram_message("⚠️ خطا در فعال‌سازی سرویس Render.")
-
-        # پاسخ به تلگرام که دکمه کلیک شده
-        requests.post(f"https://api.telegram.org/bot{bot_token}/answerCallbackQuery",
-                      data={"callback_query_id": query["id"]})
-
-    return 'OK'
-
-# -------- تست اولیه هنگام اجرا --------
 @app.route('/')
 def index():
-    send_telegram_message("✅ سرور راه‌اندازی شد.")
-    send_buttons()
-    return 'Bot is running!'
+    return 'Bot is running ✅'
 
-# -------- اجرا --------
+def monitor():
+    last_signal = None
+    while True:
+        try:
+            df = get_ohlcv()
+            signal = detect_change_of_character(df)
+            if signal and signal != last_signal:
+                send_telegram_message(f"🚨 تغییر روند {signal.upper()} در BTC/USDT")
+                chart_img = plot_chart(df)
+                send_photo_telegram(chart_img)
+                last_signal = signal
+        except Exception as e:
+            print('❌ خطا:', e)
+        time.sleep(60)  # بررسی هر 60 ثانیه
+
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=10000)
+    threading.Thread(target=monitor).start()
+    app.run(host='0.0.0.0', port=10000)
