@@ -1,65 +1,107 @@
-from flask import Flask
+import ccxt
+import pandas as pd
 import requests
+import time
+from flask import Flask
 from datetime import datetime
-from apscheduler.schedulers.background import BackgroundScheduler
-from selenium import webdriver
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.chrome.options import Options
-import os
+import io
+from PIL import Image
+import matplotlib.pyplot as plt
 
-app = Flask(__name__)
-
+# اطلاعات ربات تلگرام
 bot_token = '8253237534:AAFZr4EpriINZtYsuKB2EY4sO7S8Ja52Jhc'
 chat_id = '5214257544'
 
-# تنظیمات مرورگر برای گرفتن اسکرین‌شات
-def get_screenshot():
-    url = "https://www.tradingview.com/chart/"  # لینک مستقیم چارت بیت‌کوین اگر داری جایگزین کن
-    options = Options()
-    options.headless = True
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    driver = webdriver.Chrome(ChromeDriverManager().install(), options=options)
-    driver.set_window_size(1280, 720)
-    driver.get(url)
-    screenshot_path = "/tmp/chart.png"
-    driver.save_screenshot(screenshot_path)
-    driver.quit()
-    return screenshot_path
+# تابع ارسال پیام به تلگرام
+def send_telegram_message(message):
+    url = f'https://api.telegram.org/bot{bot_token}/sendMessage'
+    payload = {'chat_id': chat_id, 'text': message}
+    requests.post(url, data=payload)
 
-# چاک صعودی یا نزولی
-def detect_choch():
-    # اینجا باید دیتاهای لایو بیت‌کوین رو بخونی
-    # فعلاً شبیه‌سازی‌شده:
-    current_price = 100001  # فرضی
-    if current_price > 100000:
-        return "bullish"
-    elif current_price < 99900:
-        return "bearish"
-    else:
-        return None
+# تابع ارسال تصویر به تلگرام
+def send_telegram_photo(image_bytes):
+    url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
+    files = {"photo": ("chart.png", image_bytes)}
+    data = {"chat_id": chat_id}
+    requests.post(url, files=files, data=data)
 
-def send_alert(choch_type):
-    screenshot = get_screenshot()
-    message = f"🚨 CHoCH Detected: {choch_type.upper()} at {datetime.now().strftime('%H:%M:%S')}"
-    send_photo_url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
-    with open(screenshot, 'rb') as photo:
-        files = {'photo': photo}
-        data = {'chat_id': chat_id, 'caption': message}
-        requests.post(send_photo_url, files=files, data=data)
+# تابع دریافت داده کندل از Binance
+def fetch_ohlcv():
+    exchange = ccxt.binance()
+    symbol = 'BTC/USDT'
+    timeframe = '1m'
+    limit = 100
+    ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+    df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+    return df
 
+# تابع تشخیص چاک (Change of Character)
+def check_change_of_character(df, direction="bullish"):
+    if len(df) < 5:
+        return False
+
+    last_high = df['high'].iloc[-2]
+    last_low = df['low'].iloc[-2]
+
+    if direction == "bullish":
+        # تشخیص شکست آخرین سقف در روند نزولی
+        if last_high > max(df['high'].iloc[-5:-2]):
+            return True
+
+    if direction == "bearish":
+        # تشخیص شکست آخرین کف در روند صعودی
+        if last_low < min(df['low'].iloc[-5:-2]):
+            return True
+
+    return False
+
+# رسم چارت و ارسال تصویر به تلگرام
+def take_screenshot_and_send():
+    df = fetch_ohlcv()
+    plt.figure(figsize=(10, 4))
+    plt.plot(df['timestamp'], df['close'], label='Close Price')
+    plt.title('BTC/USDT - 1m')
+    plt.xlabel('Time')
+    plt.ylabel('Price')
+    plt.grid(True)
+    plt.tight_layout()
+    
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    send_telegram_photo(buf)
+    plt.close()
+
+# بررسی بازار و ارسال هشدار
 def monitor():
-    choch = detect_choch()
-    if choch:
-        send_alert(choch)
+    while True:
+        try:
+            df = fetch_ohlcv()
+            bullish_chak = check_change_of_character(df, direction="bullish")
+            bearish_chak = check_change_of_character(df, direction="bearish")
+
+            if bullish_chak:
+                send_telegram_message("📈 CHoCH Bullish Detected!")
+                take_screenshot_and_send()
+
+            if bearish_chak:
+                send_telegram_message("📉 CHoCH Bearish Detected!")
+                take_screenshot_and_send()
+
+        except Exception as e:
+            print("Error:", e)
+
+        time.sleep(60)
+
+# اجرای مانیتورینگ در پس‌زمینه روی Render
+app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return 'Bot is running...'
-
-scheduler = BackgroundScheduler()
-scheduler.add_job(monitor, 'interval', minutes=1)
-scheduler.start()
+    return "✅ Bot is running..."
 
 if __name__ == '__main__':
-    app.run(debug=False, host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
+    import threading
+    threading.Thread(target=monitor).start()
+    app.run(host='0.0.0.0', port=10000)
