@@ -2,11 +2,15 @@ import ccxt
 import pandas as pd
 import requests
 import time
-from flask import Flask
 from datetime import datetime
 import io
 from PIL import Image
 import matplotlib.pyplot as plt
+from flask import Flask, request
+import requests
+import json
+
+app = Flask(__name__)  # ← این خط مهمه
 
 # ================= تنظیمات ==================
 # اطلاعات شخصی شما
